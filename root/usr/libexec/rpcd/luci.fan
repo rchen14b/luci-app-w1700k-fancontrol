@@ -2,7 +2,52 @@
 
 # W1700K Fan Control RPC backend for LuCI
 
-HWMON="/sys/class/hwmon/hwmon5"
+# Dynamically find NCT7802 fan controller hwmon device
+find_nct7802() {
+	for hwmon in /sys/class/hwmon/hwmon*; do
+		if [ -f "$hwmon/name" ] && [ "$(cat "$hwmon/name" 2>/dev/null)" = "nct7802" ]; then
+			echo "$hwmon"
+			return
+		fi
+	done
+	echo "/sys/class/hwmon/hwmon5"  # fallback
+}
+
+# Dynamically find mt7996 WiFi hwmon devices
+find_mt7996_hwmon() {
+	local band="$1"  # 0, 1, or 2
+	for hwmon in /sys/class/hwmon/hwmon*; do
+		if [ -f "$hwmon/name" ]; then
+			local name=$(cat "$hwmon/name" 2>/dev/null)
+			case "$name" in
+				mt7996_phy0."$band"|mt7996_phy0_"$band")
+					echo "$hwmon"
+					return
+					;;
+			esac
+		fi
+	done
+	echo ""
+}
+
+# Dynamically find PHY hwmon devices (mt7530 DSA)
+find_phy_hwmon() {
+	local suffix="$1"  # :05 or :08
+	for hwmon in /sys/class/hwmon/hwmon*; do
+		if [ -f "$hwmon/name" ]; then
+			local name=$(cat "$hwmon/name" 2>/dev/null)
+			case "$name" in
+				*"$suffix")
+					echo "$hwmon"
+					return
+					;;
+			esac
+		fi
+	done
+	echo ""
+}
+
+HWMON=$(find_nct7802)
 
 read_temp() {
 	local file="$1"
@@ -35,9 +80,11 @@ get_status() {
 	# temp1 = board local (used by hardware fan curve), temp2 = external (disconnected), temp4 = external
 	temp_board=$(read_temp "${HWMON}/temp1_input")
 
-	# Read PHY temperatures from mt7530 DSA switch sensors
-	temp_phy1=$(read_temp "/sys/class/hwmon/hwmon0/temp1_input")  # 10G PHY
-	temp_phy2=$(read_temp "/sys/class/hwmon/hwmon1/temp1_input")  # Switch PHY
+	# Read PHY temperatures from mt7530 DSA switch sensors (dynamic lookup)
+	local phy1_hwmon=$(find_phy_hwmon ":05")
+	local phy2_hwmon=$(find_phy_hwmon ":08")
+	temp_phy1=$([ -n "$phy1_hwmon" ] && read_temp "$phy1_hwmon/temp1_input" || echo 0)
+	temp_phy2=$([ -n "$phy2_hwmon" ] && read_temp "$phy2_hwmon/temp1_input" || echo 0)
 
 	# Read fan status
 	fan_rpm=$(read_value "${HWMON}/fan1_input")
@@ -47,13 +94,15 @@ get_status() {
 	# Calculate percentage (0-255 -> 0-100)
 	fan_percentage=$((fan_pwm * 100 / 255))
 
-	# Get WiFi temperatures from mt7996 hwmon devices
+	# Get WiFi temperatures from mt7996 hwmon devices (dynamic lookup)
 	local wifi_24g=0 wifi_5g=0 wifi_6g=0
+	local wifi_24g_hwmon=$(find_mt7996_hwmon 0)
+	local wifi_5g_hwmon=$(find_mt7996_hwmon 1)
+	local wifi_6g_hwmon=$(find_mt7996_hwmon 2)
 
-	# Read directly from mt7996 hwmon devices
-	wifi_24g=$(read_temp "/sys/class/hwmon/hwmon2/temp1_input")  # mt7996_phy0.0 - 2.4GHz
-	wifi_5g=$(read_temp "/sys/class/hwmon/hwmon3/temp1_input")   # mt7996_phy0.1 - 5GHz
-	wifi_6g=$(read_temp "/sys/class/hwmon/hwmon4/temp1_input")   # mt7996_phy0.2 - 6GHz
+	[ -n "$wifi_24g_hwmon" ] && wifi_24g=$(read_temp "$wifi_24g_hwmon/temp1_input")
+	[ -n "$wifi_5g_hwmon" ] && wifi_5g=$(read_temp "$wifi_5g_hwmon/temp1_input")
+	[ -n "$wifi_6g_hwmon" ] && wifi_6g=$(read_temp "$wifi_6g_hwmon/temp1_input")
 
 	# Get current UCI settings
 	local uci_mode=$(uci -q get fan.settings.mode || echo "auto")
