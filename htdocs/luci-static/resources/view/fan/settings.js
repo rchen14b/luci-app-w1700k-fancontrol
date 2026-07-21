@@ -175,32 +175,23 @@ return view.extend({
 			return '<canvas id="curve-canvas" width="500" height="300" style="border: 1px solid #ccc; background: #fff; display: block; margin: 10px auto;"></canvas>';
 		};
 
-		// Custom Curve Section - only visible when mode=auto AND preset=custom
+		// Custom Curve Section
 		s = m.section(form.NamedSection, 'custom', 'curve', _('Custom Curve Editor'),
 			_('Define temperature thresholds and corresponding fan speeds.'));
 		s.anonymous = true;
 		s.addremove = false;
-
-		// Add dependency - only show when curve_preset is 'custom'
-		// This section depends on settings in another section, so we use a custom render check
-		s.render = function() {
-			var mode = uci.get('fan', 'settings', 'mode');
-			var preset = uci.get('fan', 'settings', 'curve_preset');
-			if (mode !== 'auto' || preset !== 'custom') {
-				return E('div');
-			}
-			return form.NamedSection.prototype.render.apply(this, arguments);
-		};
 
 		s.tab('points', _('Curve Points'));
 
 		for (var i = 1; i <= 5; i++) {
 			o = s.taboption('points', form.Value, 'point' + i + '_temp', _('Point %d Temperature (\u00B0C)').format(i));
 			o.datatype = 'range(0,100)';
+			o.depends({ 'fan.settings.mode': 'auto', 'fan.settings.curve_preset': 'custom' });
 			o.rmempty = false;
 
 			o = s.taboption('points', form.Value, 'point' + i + '_pwm', _('Point %d PWM (0-255)').format(i));
 			o.datatype = 'range(0,255)';
+			o.depends({ 'fan.settings.mode': 'auto', 'fan.settings.curve_preset': 'custom' });
 			o.rmempty = false;
 		}
 
